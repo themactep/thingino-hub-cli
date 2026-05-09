@@ -5,7 +5,8 @@ CLI client for Thingino Hub API v2.
 ## Quick start
 
 ```sh
-cd /home/paul/thingino/hub-cli
+git clone https://github.com/themactep/thingino-hub-cli
+cd thingino-hub-cli
 python -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
