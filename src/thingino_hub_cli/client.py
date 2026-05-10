@@ -63,3 +63,100 @@ class HubClient:
             "include_ready": str(include_ready).lower(),
         }
         return self._request("GET", "/api/v2/cameras/attention", params=params)
+
+    def refresh_api(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/refresh/api")
+
+    def refresh_onvif(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/refresh/onvif")
+
+    def refresh_snapshot(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/refresh/snapshot")
+
+    def rescan(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/rescan")
+
+    def set_privacy(self, camera_id: str, *, enabled: bool, channel: str = "all") -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v2/cameras/{camera_id}/privacy",
+            json={"enabled": enabled, "channel": channel},
+        )
+
+    def set_daynight(self, camera_id: str, *, mode: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v2/cameras/{camera_id}/daynight",
+            json={"mode": mode},
+        )
+
+    def record(
+        self,
+        camera_id: str,
+        *,
+        duration_seconds: int = 10,
+        stream_id: int = 0,
+        path: str = "",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v2/cameras/{camera_id}/record",
+            json={
+                "duration_seconds": duration_seconds,
+                "stream_id": stream_id,
+                "path": path,
+            },
+        )
+
+    def enroll(
+        self,
+        *,
+        ip: str,
+        camera_id: str = "",
+        api_token: str = "",
+        onvif_username: str = "",
+        onvif_password: str = "",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v2/enroll",
+            json={
+                "camera_id": camera_id,
+                "ip": ip,
+                "api_token": api_token,
+                "onvif_username": onvif_username,
+                "onvif_password": onvif_password,
+            },
+        )
+
+    def connect(
+        self,
+        camera_id: str,
+        *,
+        onvif_username: str = "",
+        onvif_password: str = "",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v2/cameras/{camera_id}/connect",
+            json={
+                "onvif_username": onvif_username,
+                "onvif_password": onvif_password,
+            },
+        )
+
+    def pair(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/pair")
+
+    def delete(self, camera_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/v2/cameras/{camera_id}/delete")
+
+    def bulk_action(self, *, action: str, camera_ids: list[str]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v2/bulk-action",
+            json={
+                "action": action,
+                "camera_ids": camera_ids,
+            },
+        )

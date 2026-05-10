@@ -3,15 +3,21 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import typer
 
 from .client import HubApiError, HubClient
 
 app = typer.Typer(help="Thingino Hub API v2 command-line client")
-cameras_app = typer.Typer(help="Camera-related commands")
+cameras_app = typer.Typer(help="Camera read commands")
+actions_app = typer.Typer(help="Camera action commands")
+lifecycle_app = typer.Typer(help="Camera lifecycle commands")
+bulk_app = typer.Typer(help="Bulk action commands")
 app.add_typer(cameras_app, name="cameras")
+app.add_typer(actions_app, name="actions")
+app.add_typer(lifecycle_app, name="lifecycle")
+app.add_typer(bulk_app, name="bulk")
 
 
 @dataclass
@@ -22,6 +28,17 @@ class CliContext:
 
 def _print_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _run_api_call(ctx: CliContext, label: str, fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    try:
+        return fn()
+    except HubApiError as error:
+        typer.echo(f"{label} failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:
+        typer.echo(f"{label} failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
 
 
 def _print_cameras(payload: dict[str, Any]) -> None:
@@ -60,6 +77,23 @@ def _print_attention(payload: dict[str, Any]) -> None:
             )
 
 
+def _print_action_result(payload: dict[str, Any]) -> None:
+    if "camera_id" in payload and "action" in payload:
+        typer.echo(f"{payload.get('action')} {payload.get('camera_id')}: {payload.get('result')}")
+        typer.echo(str(payload.get("message") or ""))
+        return
+    if "action" in payload and "result" in payload:
+        result = payload.get("result")
+        if isinstance(result, dict):
+            typer.echo(
+                f"{payload.get('action')}: "
+                f"{result.get('success_count', 0)}/{result.get('total', 0)} successful"
+            )
+            typer.echo(str(payload.get("message") or ""))
+            return
+    typer.echo(str(payload.get("message") or "ok"))
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -83,16 +117,10 @@ def main(
 @app.command("health")
 def health(ctx: typer.Context) -> None:
     state: CliContext = ctx.obj
-    try:
-        payload = state.client.health()
-    except HubApiError as error:
-        typer.echo(f"health failed: {error}", err=True)
-        raise typer.Exit(code=1) from error
-
+    payload = _run_api_call(state, "health", state.client.health)
     if state.json_output:
         _print_json(payload)
         return
-
     hub = payload.get("hub") or {}
     typer.echo(f"ok: {payload.get('ok')}")
     typer.echo(f"mqtt_connected: {hub.get('mqtt_connected')}")
@@ -106,12 +134,7 @@ def cameras_list(
     limit: int = typer.Option(0, min=0, help="Max number of cameras to return (0 = default/all)."),
 ) -> None:
     state: CliContext = ctx.obj
-    try:
-        payload = state.client.cameras(limit=limit)
-    except HubApiError as error:
-        typer.echo(f"camera list failed: {error}", err=True)
-        raise typer.Exit(code=1) from error
-
+    payload = _run_api_call(state, "camera list", lambda: state.client.cameras(limit=limit))
     if state.json_output:
         _print_json(payload)
         return
@@ -126,17 +149,209 @@ def cameras_attention(
     include_ready: bool = typer.Option(False, help="Include cameras without actionable issues."),
 ) -> None:
     state: CliContext = ctx.obj
-    try:
-        payload = state.client.attention(
+    payload = _run_api_call(
+        state,
+        "camera attention",
+        lambda: state.client.attention(
             minimum_severity=minimum_severity,
             limit=limit,
             include_ready=include_ready,
-        )
-    except HubApiError as error:
-        typer.echo(f"camera attention failed: {error}", err=True)
-        raise typer.Exit(code=1) from error
-
+        ),
+    )
     if state.json_output:
         _print_json(payload)
         return
     _print_attention(payload)
+
+
+@actions_app.command("refresh-api")
+def refresh_api(ctx: typer.Context, camera_id: str) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "refresh-api", lambda: state.client.refresh_api(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("refresh-onvif")
+def refresh_onvif(ctx: typer.Context, camera_id: str) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "refresh-onvif", lambda: state.client.refresh_onvif(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("refresh-snapshot")
+def refresh_snapshot(ctx: typer.Context, camera_id: str) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "refresh-snapshot", lambda: state.client.refresh_snapshot(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("rescan")
+def rescan(ctx: typer.Context, camera_id: str) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "rescan", lambda: state.client.rescan(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("privacy")
+def privacy(
+    ctx: typer.Context,
+    camera_id: str,
+    enabled: bool = typer.Option(True, "--enabled/--disabled", help="Enable or disable privacy."),
+    channel: str = typer.Option("all", help="Channel selector, defaults to all."),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(
+        state,
+        "privacy",
+        lambda: state.client.set_privacy(camera_id, enabled=enabled, channel=channel),
+    )
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("daynight")
+def daynight(
+    ctx: typer.Context,
+    camera_id: str,
+    mode: str = typer.Option(..., help="auto|day|night"),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "daynight", lambda: state.client.set_daynight(camera_id, mode=mode))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@actions_app.command("record")
+def record(
+    ctx: typer.Context,
+    camera_id: str,
+    duration_seconds: int = typer.Option(10, min=1),
+    stream_id: int = typer.Option(0, min=0),
+    path: str = typer.Option("", help="Output path on hub side if supported."),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(
+        state,
+        "record",
+        lambda: state.client.record(
+            camera_id,
+            duration_seconds=duration_seconds,
+            stream_id=stream_id,
+            path=path,
+        ),
+    )
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@lifecycle_app.command("enroll")
+def enroll(
+    ctx: typer.Context,
+    ip: str = typer.Option(..., help="Camera IP address."),
+    camera_id: str = typer.Option("", help="Optional camera id."),
+    api_token: str = typer.Option("", help="Optional API token."),
+    onvif_username: str = typer.Option("", help="ONVIF username."),
+    onvif_password: str = typer.Option("", help="ONVIF password."),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(
+        state,
+        "enroll",
+        lambda: state.client.enroll(
+            ip=ip,
+            camera_id=camera_id,
+            api_token=api_token,
+            onvif_username=onvif_username,
+            onvif_password=onvif_password,
+        ),
+    )
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@lifecycle_app.command("connect")
+def connect(
+    ctx: typer.Context,
+    camera_id: str,
+    onvif_username: str = typer.Option("", help="ONVIF username."),
+    onvif_password: str = typer.Option("", help="ONVIF password."),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(
+        state,
+        "connect",
+        lambda: state.client.connect(
+            camera_id,
+            onvif_username=onvif_username,
+            onvif_password=onvif_password,
+        ),
+    )
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@lifecycle_app.command("pair")
+def pair(ctx: typer.Context, camera_id: str) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(state, "pair", lambda: state.client.pair(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@lifecycle_app.command("delete")
+def delete(
+    ctx: typer.Context,
+    camera_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Confirm delete action."),
+) -> None:
+    state: CliContext = ctx.obj
+    if not yes:
+        typer.echo("Refusing to delete without --yes", err=True)
+        raise typer.Exit(code=1)
+    payload = _run_api_call(state, "delete", lambda: state.client.delete(camera_id))
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
+
+
+@bulk_app.command("run")
+def bulk_run(
+    ctx: typer.Context,
+    action: str = typer.Option(..., help="Bulk action name, e.g. refresh-api."),
+    camera_ids: list[str] = typer.Option(..., "--camera-id", help="Repeat for each target camera."),
+) -> None:
+    state: CliContext = ctx.obj
+    payload = _run_api_call(
+        state,
+        "bulk action",
+        lambda: state.client.bulk_action(action=action, camera_ids=camera_ids),
+    )
+    if state.json_output:
+        _print_json(payload)
+        return
+    _print_action_result(payload)
